@@ -1,0 +1,39 @@
+# Django
+*.log
+*.pot
+*.pyc
+__pycache__/
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Media and Static
+/media/
+/static/
+
+# Environments
+.env
+.venv
+venv/
+ENV/
+env/
+
+# IDEs
+.vscode/
+.idea/
+
+# Distribution / packaging
+bin/
+build/
+develop-eggs/
+dist/
+eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
