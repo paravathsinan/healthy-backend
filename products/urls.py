@@ -1,6 +1,6 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import CategoryViewSet, ProductViewSet, CreateOrderLogView, DashboardStatsView, HeroSlideViewSet, admin_login
+from .views import CategoryViewSet, ProductViewSet, CreateOrderLogView, DashboardStatsView, HeroSlideViewSet, admin_login, ping
 
 
 
@@ -12,9 +12,9 @@ router.register(r'heroslides', HeroSlideViewSet)
 
 urlpatterns = [
     path('', include(router.urls)),
+    path('ping/', ping, name='ping'),
     path('login/', admin_login, name='admin-login'),
 
     path('log-order/', CreateOrderLogView.as_view(), name='log-order'),
     path('dashboard-stats/', DashboardStatsView.as_view(), name='dashboard-stats'),
 ]
-

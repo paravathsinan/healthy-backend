@@ -17,6 +17,11 @@ from .serializers import (
     HeroSlideSerializer
 )
 
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def ping(request):
+    return Response({"status": "ok", "message": "Pong!"})
+
 @api_view(['POST'])
 @permission_classes([permissions.AllowAny])
 def admin_login(request):
