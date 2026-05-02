@@ -124,10 +124,17 @@ if not DEBUG:
     CSRF_COOKIE_SECURE = True
     SECURE_BROWSER_XSS_FILTER = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
-    CSRF_TRUSTED_ORIGINS = os.getenv('CSRF_TRUSTED_ORIGINS', 'https://*.onrender.com').split(',')
-
 # CORS Settings
-CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000').split(',')
+CORS_ALLOWED_ORIGINS = os.getenv(
+    'CORS_ALLOWED_ORIGINS', 
+    'http://localhost:3000,http://127.0.0.1:3000,https://healthy-frontend.vercel.app'
+).split(',')
+
+# CSRF Trusted Origins
+CSRF_TRUSTED_ORIGINS = os.getenv(
+    'CSRF_TRUSTED_ORIGINS', 
+    'https://*.onrender.com,https://healthy-frontend.vercel.app'
+).split(',')
 
 # REST Framework Settings
 REST_FRAMEWORK = {
