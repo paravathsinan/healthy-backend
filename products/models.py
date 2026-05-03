@@ -106,3 +106,10 @@ class HeroSlide(models.Model):
     def __str__(self):
         return self.title
 
+class VisitorLog(models.Model):
+    ip_address = models.GenericIPAddressField()
+    visited_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Visit from {self.ip_address} at {self.visited_at}"
+

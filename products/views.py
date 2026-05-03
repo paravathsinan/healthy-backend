@@ -61,7 +61,7 @@ class ProductViewSet(viewsets.ModelViewSet):
     search_fields = ['name', 'description']
 
     def get_queryset(self):
-        queryset = Product.objects.all().prefetch_related('images', 'variants')
+        queryset = Product.objects.all().prefetch_related('images', 'variants').order_by('-created_at')
         
         # If user is not an admin, only show non-hidden products
         if not (self.request.user and (self.request.user.is_staff or self.request.user.is_superuser)):
@@ -83,11 +83,15 @@ class CreateOrderLogView(generics.CreateAPIView):
 class DashboardStatsView(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request):
-
         from orders.models import Order
+        from .models import VisitorLog
+        
+        # Count unique IPs across all time
+        total_visitors = VisitorLog.objects.values('ip_address').distinct().count()
+        
         return Response({
             'product_count': Product.objects.count(),
             'category_count': Category.objects.count(),
             'whatsapp_clicks': Order.objects.count(),
-            'active_visitors': 1, # Minimal realistic value
+            'total_visitors': total_visitors,
         })
