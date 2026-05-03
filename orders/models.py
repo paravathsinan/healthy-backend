@@ -1,4 +1,6 @@
+import secrets
 from django.db import models
+from django.utils import timezone
 from products.models import Product, ProductVariant
 
 class Order(models.Model):
@@ -12,6 +14,7 @@ class Order(models.Model):
         ('CANCELLED', 'Cancelled'),
     ]
 
+    order_number = models.CharField(max_length=20, unique=True, editable=False, null=True, blank=True)
     customer_name = models.CharField(max_length=255)
     customer_phone = models.CharField(max_length=20)
     customer_address = models.TextField()
@@ -23,8 +26,22 @@ class Order(models.Model):
     class Meta:
         ordering = ['-created_at']
 
+    def save(self, *args, **kwargs):
+        if not self.order_number:
+            date_str = timezone.now().strftime('%d%m%y')
+            # Generate random 4-character hex code
+            random_str = secrets.token_hex(2).upper()
+            self.order_number = f"HDN-{date_str}-{random_str}"
+            
+            # Uniqueness check
+            while Order.objects.filter(order_number=self.order_number).exists():
+                random_str = secrets.token_hex(2).upper()
+                self.order_number = f"HDN-{date_str}-{random_str}"
+        
+        super().save(*args, **kwargs)
+
     def __str__(self):
-        return f"Order #{self.id} - {self.customer_name}"
+        return f"Order {self.order_number} - {self.customer_name}"
 
 class OrderItem(models.Model):
     order = models.ForeignKey(Order, related_name='items', on_delete=models.CASCADE)

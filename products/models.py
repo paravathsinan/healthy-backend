@@ -27,11 +27,12 @@ class Product(models.Model):
     name = models.CharField(max_length=200)
 
     slug = models.SlugField(unique=True, blank=True)
-    description = models.TextField()
+    description = models.TextField(blank=True, null=True)
     is_featured = models.BooleanField(default=False)
     is_best_seller = models.BooleanField(default=False)
     is_new_arrival = models.BooleanField(default=False)
     is_sold_out = models.BooleanField(default=False)
+    is_hidden = models.BooleanField(default=False)
     badge_text = models.CharField(max_length=50, null=True, blank=True) # e.g., "16% OFF"
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -41,27 +42,19 @@ class Product(models.Model):
             self.slug = slugify(self.name)
             
         if not self.sku and self.category:
-            # Use category prefix or first letter of category name
             p_prefix = self.category.prefix or self.category.name[0].upper()
             
-            # Find all products in this category to get the next sequence number
-            # We look for the highest existing number for this prefix
-            from django.db.models import Max
-            category_products = Product.objects.filter(category=self.category, sku__startswith=p_prefix)
+            # Count products in this category to generate next number
+            # Using count is simple but we'll check for uniqueness to be safe
+            category_products = Product.objects.filter(category=self.category)
+            count = category_products.count() + 1
             
-            if category_products.exists():
-                # This is a bit naive but works for standard cases like D1, D2...
-                # For better robustness we'd need to parse the numeric part
-                # But let's keep it simple for now as requested
-                count = category_products.count() + 1
-                self.sku = f"{p_prefix}{count}"
+            sku_code = f"HDN-{p_prefix}-{count:03d}"
+            while Product.objects.filter(sku=sku_code).exists():
+                count += 1
+                sku_code = f"HDN-{p_prefix}-{count:03d}"
                 
-                # Check for collision (just in case)
-                while Product.objects.filter(sku=self.sku).exists():
-                    count += 1
-                    self.sku = f"{p_prefix}{count}"
-            else:
-                self.sku = f"{p_prefix}1"
+            self.sku = sku_code
                 
         super().save(*args, **kwargs)
 

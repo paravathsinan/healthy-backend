@@ -54,11 +54,20 @@ class CategoryViewSet(viewsets.ModelViewSet):
     serializer_class = CategorySerializer
 
 class ProductViewSet(viewsets.ModelViewSet):
-    queryset = Product.objects.all().prefetch_related('images', 'variants')
+    queryset = Product.objects.all()
+    lookup_field = 'slug'
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['category__slug', 'is_featured', 'is_best_seller', 'is_new_arrival']
     search_fields = ['name', 'description']
-    lookup_field = 'slug'
+
+    def get_queryset(self):
+        queryset = Product.objects.all().prefetch_related('images', 'variants')
+        
+        # If user is not an admin, only show non-hidden products
+        if not (self.request.user and (self.request.user.is_staff or self.request.user.is_superuser)):
+            queryset = queryset.filter(is_hidden=False)
+            
+        return queryset
 
     def get_serializer_class(self):
         # Return detail serializer for single product, list for multiple

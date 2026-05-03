@@ -1,4 +1,6 @@
 from rest_framework import serializers
+from django.db import transaction
+from decimal import Decimal
 from .models import Category, Product, ProductVariant, ProductImage, ShadowOrderLog, HeroSlide
 
 class HeroSlideSerializer(serializers.ModelSerializer):
@@ -16,7 +18,10 @@ class CategorySerializer(serializers.ModelSerializer):
 
 
     def get_products_count(self, obj):
-        return obj.products.count()
+        request = self.context.get('request')
+        if request and (request.user and (request.user.is_staff or request.user.is_superuser)):
+            return obj.products.count()
+        return obj.products.filter(is_hidden=False).count()
 
 class ProductImageSerializer(serializers.ModelSerializer):
     class Meta:
@@ -42,7 +47,7 @@ class ProductListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'sku', 'name', 'slug', 'primary_image', 'cheapest_variant_price', 
             'is_featured', 'is_best_seller', 'is_new_arrival', 'category', 'category_name', 'category_slug',
-            'is_sold_out', 'badge_text', 'variants', 'images'
+            'is_sold_out', 'is_hidden', 'badge_text', 'variants', 'images', 'updated_at'
         ]
 
 
@@ -74,17 +79,20 @@ class ProductDetailSerializer(serializers.ModelSerializer):
             'id', 'sku', 'name', 'slug', 'description', 'category', 
             'category_name', 'images', 'variants', 
             'is_featured', 'is_best_seller', 'is_new_arrival', 'cheapest_variant_price',
-            'base_price', 'base_discount_price', 'image_url', 'gallery_images', 'is_sold_out', 'badge_text'
+            'base_price', 'base_discount_price', 'image_url', 'gallery_images', 'is_sold_out', 'is_hidden', 'badge_text', 'updated_at'
         ]
 
         extra_kwargs = {
-            'slug': {'required': False}
+            'sku': {'read_only': True},
+            'slug': {'required': False},
+            'description': {'required': False, 'allow_blank': True}
         }
 
     def get_cheapest_variant_price(self, obj):
         variant = obj.variants.order_by('price').first()
         return variant.price if variant else None
 
+    @transaction.atomic
     def create(self, validated_data):
         images_data = validated_data.pop('images', [])
         variants_data = validated_data.pop('variants', [])
@@ -96,27 +104,28 @@ class ProductDetailSerializer(serializers.ModelSerializer):
         product = Product.objects.create(**validated_data)
         
         if base_price:
-            from decimal import Decimal
-            # Auto-create the 3 standard weights if base_price is given
+            bp = Decimal(str(base_price))
+            bdp = Decimal(str(base_discount_price)) if base_discount_price else None
+            
             # 1000G
             ProductVariant.objects.create(
                 product=product, weight='1000 G', 
-                price=base_price, 
-                discount_price=base_discount_price,
+                price=bp, 
+                discount_price=bdp,
                 stock_count=100
             )
-            # 500G (55% of 1kg price)
+            # 500G
             ProductVariant.objects.create(
                 product=product, weight='500 G', 
-                price=base_price * Decimal('0.55'), 
-                discount_price=base_discount_price * Decimal('0.55') if base_discount_price else None,
+                price=(bp * Decimal('0.55')).quantize(Decimal('0.01')), 
+                discount_price=(bdp * Decimal('0.55')).quantize(Decimal('0.01')) if bdp else None,
                 stock_count=100
             )
-            # 250G (30% of 1kg price)
+            # 250G
             ProductVariant.objects.create(
                 product=product, weight='250 G', 
-                price=base_price * Decimal('0.30'), 
-                discount_price=base_discount_price * Decimal('0.30') if base_discount_price else None,
+                price=(bp * Decimal('0.30')).quantize(Decimal('0.01')), 
+                discount_price=(bdp * Decimal('0.30')).quantize(Decimal('0.01')) if bdp else None,
                 stock_count=100
             )
         elif variants_data:
@@ -135,40 +144,48 @@ class ProductDetailSerializer(serializers.ModelSerializer):
             
         return product
 
+    @transaction.atomic
     def update(self, instance, validated_data):
         base_price = validated_data.pop('base_price', None)
         base_discount_price = validated_data.pop('base_discount_price', None)
         image_url = validated_data.pop('image_url', None)
         gallery_images = validated_data.pop('gallery_images', None)
         
-        # Update variants if base_price sent
+        # Update model fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        
+        # Update variants only if a valid base_price is provided
         if base_price:
-            from decimal import Decimal
+            bp = Decimal(str(base_price))
+            bdp = Decimal(str(base_discount_price)) if base_discount_price else None
+            
             instance.variants.all().delete()
             # 1000G
             ProductVariant.objects.create(
                 product=instance, weight='1000 G', 
-                price=base_price, 
-                discount_price=base_discount_price,
+                price=bp, 
+                discount_price=bdp,
                 stock_count=100
             )
             # 500G
             ProductVariant.objects.create(
                 product=instance, weight='500 G', 
-                price=base_price * Decimal('0.55'), 
-                discount_price=base_discount_price * Decimal('0.55') if base_discount_price else None,
+                price=(bp * Decimal('0.55')).quantize(Decimal('0.01')), 
+                discount_price=(bdp * Decimal('0.55')).quantize(Decimal('0.01')) if bdp else None,
                 stock_count=100
             )
             # 250G
             ProductVariant.objects.create(
                 product=instance, weight='250 G', 
-                price=base_price * Decimal('0.30'), 
-                discount_price=base_discount_price * Decimal('0.30') if base_discount_price else None,
+                price=(bp * Decimal('0.30')).quantize(Decimal('0.01')), 
+                discount_price=(bdp * Decimal('0.30')).quantize(Decimal('0.01')) if bdp else None,
                 stock_count=100
             )
             
-        # Update images if image_url or gallery_images sent
-        if image_url is not None or gallery_images is not None:
+        # Update images only if image_url or non-empty gallery provided
+        if image_url or (gallery_images is not None and len(gallery_images) > 0):
             instance.images.all().delete()
             if image_url:
                 ProductImage.objects.create(product=instance, image_url=image_url, is_primary=True)
@@ -176,7 +193,7 @@ class ProductDetailSerializer(serializers.ModelSerializer):
                 for img in gallery_images:
                     ProductImage.objects.create(product=instance, image_url=img, is_primary=False)
 
-        return super().update(instance, validated_data)
+        return instance
 
 class ShadowOrderLogSerializer(serializers.ModelSerializer):
     class Meta:
