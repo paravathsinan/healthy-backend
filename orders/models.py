@@ -22,11 +22,41 @@ class Order(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    
+    # Milestone Timestamps
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    processed_at = models.DateTimeField(null=True, blank=True)
+    shipped_at = models.DateTimeField(null=True, blank=True)
+    delivered_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ['-created_at']
 
     def save(self, *args, **kwargs):
+        if self.pk:
+            old_order = Order.objects.get(pk=self.pk)
+            if old_order.status != self.status:
+                now = timezone.now()
+                
+                # Logic to backfill timestamps if steps are skipped
+                if self.status == 'CONTACTED':
+                    if not self.confirmed_at: self.confirmed_at = now
+                
+                elif self.status == 'AWAITING_PAY' or self.status == 'PAID':
+                    if not self.confirmed_at: self.confirmed_at = now
+                    if not self.processed_at: self.processed_at = now
+                
+                elif self.status == 'SHIPPED':
+                    if not self.confirmed_at: self.confirmed_at = now
+                    if not self.processed_at: self.processed_at = now
+                    if not self.shipped_at: self.shipped_at = now
+                
+                elif self.status == 'COMPLETED':
+                    if not self.confirmed_at: self.confirmed_at = now
+                    if not self.processed_at: self.processed_at = now
+                    if not self.shipped_at: self.shipped_at = now
+                    if not self.delivered_at: self.delivered_at = now
+
         if not self.order_number:
             date_str = timezone.now().strftime('%d%m%y')
             # Generate random 4-character hex code
