@@ -43,15 +43,39 @@ def admin_login(request):
     else:
         return Response({"error": "Invalid credentials or unauthorized access"}, status=400)
 
-class HeroSlideViewSet(viewsets.ModelViewSet):
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def verify_token(request):
+    if not (request.user.is_staff or request.user.is_superuser):
+        return Response({"error": "Unauthorized access"}, status=403)
+        
+    return Response({
+        "status": "valid",
+        "user": {
+            "username": request.user.username,
+            "email": request.user.email
+        }
+    })
 
+class HeroSlideViewSet(viewsets.ModelViewSet):
     queryset = HeroSlide.objects.all()
     serializer_class = HeroSlideSerializer
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+
+    def get_permissions(self):
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [permissions.IsAdminUser()]
+        return [permissions.AllowAny()]
 
 
 class CategoryViewSet(viewsets.ModelViewSet):
     queryset = Category.objects.all()
     serializer_class = CategorySerializer
+    
+    def get_permissions(self):
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [permissions.IsAdminUser()]
+        return [permissions.AllowAny()]
 
 class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.all()
@@ -69,6 +93,11 @@ class ProductViewSet(viewsets.ModelViewSet):
             
         return queryset
 
+    def get_permissions(self):
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [permissions.IsAdminUser()]
+        return [permissions.AllowAny()]
+
     def get_serializer_class(self):
         # Return detail serializer for single product, list for multiple
         if self.action in ['retrieve', 'create', 'update', 'partial_update']:
@@ -81,7 +110,7 @@ class CreateOrderLogView(generics.CreateAPIView):
     serializer_class = ShadowOrderLogSerializer
 
 class DashboardStatsView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [permissions.IsAdminUser]
     def get(self, request):
         from orders.models import Order
         from .models import VisitorLog

@@ -36,7 +36,8 @@ class ProductVariantSerializer(serializers.ModelSerializer):
 class ProductListSerializer(serializers.ModelSerializer):
     """Simplified serializer for the grid view (Home/Category pages)"""
     primary_image = serializers.SerializerMethodField()
-    cheapest_variant_price = serializers.SerializerMethodField()
+    admin_price = serializers.SerializerMethodField()
+    admin_weight = serializers.SerializerMethodField()
     category_name = serializers.ReadOnlyField(source='category.name')
     category_slug = serializers.ReadOnlyField(source='category.slug')
     variants = ProductVariantSerializer(many=True, read_only=True)
@@ -45,7 +46,7 @@ class ProductListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = [
-            'id', 'sku', 'name', 'slug', 'primary_image', 'cheapest_variant_price', 
+            'id', 'sku', 'name', 'slug', 'primary_image', 'admin_price', 'admin_weight',
             'is_featured', 'is_best_seller', 'is_new_arrival', 'category', 'category_name', 'category_slug',
             'is_sold_out', 'is_hidden', 'badge_text', 'variants', 'images', 'updated_at'
         ]
@@ -56,16 +57,32 @@ class ProductListSerializer(serializers.ModelSerializer):
         img = obj.images.filter(is_primary=True).first()
         return img.image_url if img else None
 
-    def get_cheapest_variant_price(self, obj):
-        variant = obj.variants.order_by('price').first()
+    def _get_admin_variant(self, obj):
+        # Try to find 1000 G variant first
+        variant = obj.variants.filter(weight__icontains='1000').first()
+        if not variant:
+            # Fallback to Unit variant
+            variant = obj.variants.filter(weight__icontains='unit').first()
+        if not variant:
+            # Final fallback to cheapest
+            variant = obj.variants.order_by('price').first()
+        return variant
+
+    def get_admin_price(self, obj):
+        variant = self._get_admin_variant(obj)
         return variant.price if variant else None
+
+    def get_admin_weight(self, obj):
+        variant = self._get_admin_variant(obj)
+        return variant.weight if variant else None
 
 class ProductDetailSerializer(serializers.ModelSerializer):
     """Detailed serializer for the Product Detail Page (PDP) and Admin CRUD"""
     images = ProductImageSerializer(many=True, required=False)
     variants = ProductVariantSerializer(many=True, required=False)
     category_name = serializers.ReadOnlyField(source='category.name')
-    cheapest_variant_price = serializers.SerializerMethodField()
+    admin_price = serializers.SerializerMethodField()
+    admin_weight = serializers.SerializerMethodField()
     
     # Write-only fields for simpler CRUD
     base_price = serializers.DecimalField(max_digits=10, decimal_places=2, write_only=True, required=False)
@@ -78,19 +95,25 @@ class ProductDetailSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'sku', 'name', 'slug', 'description', 'category', 
             'category_name', 'images', 'variants', 
-            'is_featured', 'is_best_seller', 'is_new_arrival', 'cheapest_variant_price',
+            'is_featured', 'is_best_seller', 'is_new_arrival', 'admin_price', 'admin_weight',
             'base_price', 'base_discount_price', 'image_url', 'gallery_images', 'is_sold_out', 'is_hidden', 'badge_text', 'updated_at'
         ]
 
-        extra_kwargs = {
-            'sku': {'read_only': True},
-            'slug': {'required': False},
-            'description': {'required': False, 'allow_blank': True}
-        }
+    def _get_admin_variant(self, obj):
+        variant = obj.variants.filter(weight__icontains='1000').first()
+        if not variant:
+            variant = obj.variants.filter(weight__icontains='unit').first()
+        if not variant:
+            variant = obj.variants.order_by('price').first()
+        return variant
 
-    def get_cheapest_variant_price(self, obj):
-        variant = obj.variants.order_by('price').first()
+    def get_admin_price(self, obj):
+        variant = self._get_admin_variant(obj)
         return variant.price if variant else None
+
+    def get_admin_weight(self, obj):
+        variant = self._get_admin_variant(obj)
+        return variant.weight if variant else None
 
     @transaction.atomic
     def create(self, validated_data):
