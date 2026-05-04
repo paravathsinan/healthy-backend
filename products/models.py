@@ -34,6 +34,7 @@ class Product(models.Model):
     is_sold_out = models.BooleanField(default=False)
     is_hidden = models.BooleanField(default=False)
     badge_text = models.CharField(max_length=50, null=True, blank=True) # e.g., "16% OFF"
+    tags = models.JSONField(default=list, blank=True) # e.g., ["Organic", "No Added Sugar"]
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

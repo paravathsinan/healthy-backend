@@ -1,34 +1,62 @@
 # Dates & Nuts Backend (Django API)
 
-Essential backend infrastructure for the Dates & Nuts platform. Handles data persistence, admin authentication, and storefront API integration.
+High-performance API infrastructure for the Dates & Nuts platform. Designed for scalability, security, and seamless integration with the Next.js storefront.
 
 ## 🛠 Core Stack
-- Django 6.0+ & DRF
-- Token Authentication
-- PostgreSQL (Primary) / SQLite (Fallback)
+- **Framework**: Django 6.0+ & Django REST Framework (DRF)
+- **Database**: PostgreSQL (Primary) with SQLite support for local development
+- **Authentication**: DRF Token-based Auth system
+- **Middleware**: Custom CORS management and CSRF protection for cross-origin storefront requests
 
 ## 🚀 Quick Setup
-1. **Virtual Env**: `python -m venv venv` -> `.\venv\Scripts\activate` (Windows)
-2. **Install**: `pip install django djangorestframework django-cors-headers django-filter psycopg2-binary python-dotenv`
-3. **Environment**: Create `.env` with:
-   - `DEBUG=True`, `SECRET_KEY`, `ALLOWED_HOSTS`
-   - `DB_ENGINE`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`
-4. **Initialize**: `python manage.py migrate` -> `python manage.py createsuperuser`
-5. **Start**: `python manage.py runserver`
+1. **Virtual Environment**: 
+   ```bash
+   python -m venv venv
+   .\venv\Scripts\activate  # Windows
+   ```
+2. **Install Requirements**:
+   ```bash
+   pip install django djangorestframework django-cors-headers django-filter psycopg2-binary python-dotenv
+   ```
+3. **Environment Configuration**: Create `.env`:
+   ```env
+   DEBUG=True
+   SECRET_KEY=your_secret_key
+   ALLOWED_HOSTS=127.0.0.1,localhost
+   CORS_ALLOWED_ORIGINS=http://localhost:3000
+   ```
+4. **Database Migration**:
+   ```bash
+   python manage.py migrate
+   python manage.py createsuperuser
+   ```
+5. **Run Server**:
+   ```bash
+   python manage.py runserver
+   ```
 
-## 🔌 API Reference (Base: `/api/v1/`)
+## 🔌 API Ecosystem (Prefix: `/api/v1/`)
 
 | Endpoint | Method | Auth | Purpose |
 |----------|--------|------|---------|
 | `login/` | POST | None | Staff-only login (Returns Token) |
-| `products/` | GET | None | Fetch storefront products |
-| `products/` | POST/PATCH | Token | Manage inventory (Admin) |
+| `products/` | GET | None | Fetch storefront catalog |
+| `products/` | POST/PATCH | Token | Inventory management (Admin) |
 | `categories/` | GET | None | Fetch storefront categories |
-| `heroslides/` | GET | None | Fetch dynamic carousel slides |
-| `dashboard-stats/` | GET | Token | Admin dashboard metrics |
-| `log-order/` | POST | None | Record WhatsApp click activity |
+| `heroslides/` | GET | None | Fetch dynamic storefront carousel |
+| `dashboard-stats/` | GET | Token | Real-time Admin metrics |
+| `log-order/` | POST | None | Record customer WhatsApp activity |
 
-## 🔒 Security Logic
-- **Admin Access**: Only users with `is_staff=True` or `is_superuser=True` can authenticate.
-- **Auth Interceptor**: All management requests must include `Authorization: Token <key>`.
-- **CORS**: Strictly restricted to defined frontend origins in `.env`.
+## 🏗 Data Model Enhancements
+- **Multi-Badge Support**: Products now support a dynamic `tags` array for the premium multi-tagging system.
+- **Precision Pricing**: Implementation of base pricing and per-unit/kg logic for inventory consistency.
+- **Activity Tracking**: Integrated `OrderLog` model to monitor conversion activity from WhatsApp redirects.
+
+## 🔒 Security Architecture
+- **Staff-Only Auth**: Authentication is strictly limited to users with `is_staff=True` to prevent unauthorized dashboard access.
+- **CORS Strategy**: Production-ready CORS configuration strictly mapping permitted origins (e.g., Vercel frontend) to the Render API.
+- **Environment Parity**: Standardized environment variable schema for seamless transitions between Local, Development, and Production environments.
+
+## 🌍 Production Deployment
+- **Backend (Render)**: Configured for Gunicorn with automated migrations and dynamic port binding.
+- **Frontend (Vercel)**: Integrated with the backend API via secure environment variables.

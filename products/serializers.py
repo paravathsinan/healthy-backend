@@ -48,7 +48,7 @@ class ProductListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'sku', 'name', 'slug', 'primary_image', 'admin_price', 'admin_weight',
             'is_featured', 'is_best_seller', 'is_new_arrival', 'category', 'category_name', 'category_slug',
-            'is_sold_out', 'is_hidden', 'badge_text', 'variants', 'images', 'updated_at'
+            'is_sold_out', 'is_hidden', 'badge_text', 'tags', 'variants', 'images', 'updated_at'
         ]
 
 
@@ -96,7 +96,7 @@ class ProductDetailSerializer(serializers.ModelSerializer):
             'id', 'sku', 'name', 'slug', 'description', 'category', 
             'category_name', 'images', 'variants', 
             'is_featured', 'is_best_seller', 'is_new_arrival', 'admin_price', 'admin_weight',
-            'base_price', 'base_discount_price', 'image_url', 'gallery_images', 'is_sold_out', 'is_hidden', 'badge_text', 'updated_at'
+            'base_price', 'base_discount_price', 'image_url', 'gallery_images', 'is_sold_out', 'is_hidden', 'badge_text', 'tags', 'updated_at'
         ]
 
     def _get_admin_variant(self, obj):
