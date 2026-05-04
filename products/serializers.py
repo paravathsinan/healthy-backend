@@ -2,19 +2,47 @@ from rest_framework import serializers
 from django.db import transaction
 from decimal import Decimal
 from .models import Category, Product, ProductVariant, ProductImage, ShadowOrderLog, HeroSlide
+from .utils import upload_image_to_cloudinary
 
 class HeroSlideSerializer(serializers.ModelSerializer):
+    image_url = serializers.CharField() # Accept Base64 or URL
+
     class Meta:
         model = HeroSlide
         fields = '__all__'
 
+    def create(self, validated_data):
+        image_url = validated_data.get('image_url')
+        if image_url:
+            validated_data['image_url'] = upload_image_to_cloudinary(image_url, folder="dates_nuts/hero")
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        image_url = validated_data.get('image_url')
+        if image_url:
+            validated_data['image_url'] = upload_image_to_cloudinary(image_url, folder="dates_nuts/hero")
+        return super().update(instance, validated_data)
+
 
 class CategorySerializer(serializers.ModelSerializer):
     products_count = serializers.SerializerMethodField()
+    image_url = serializers.CharField(required=False, allow_null=True, allow_blank=True)
 
     class Meta:
         model = Category
         fields = ['id', 'name', 'slug', 'image_url', 'display_order', 'products_count', 'prefix']
+
+    def create(self, validated_data):
+        image_url = validated_data.get('image_url')
+        if image_url:
+            validated_data['image_url'] = upload_image_to_cloudinary(image_url, folder="dates_nuts/categories")
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        image_url = validated_data.get('image_url')
+        if image_url:
+            validated_data['image_url'] = upload_image_to_cloudinary(image_url, folder="dates_nuts/categories")
+        return super().update(instance, validated_data)
 
 
     def get_products_count(self, obj):
@@ -34,39 +62,127 @@ class ProductVariantSerializer(serializers.ModelSerializer):
         fields = ['id', 'weight', 'price', 'discount_price', 'stock_count']
 
 class ProductListSerializer(serializers.ModelSerializer):
-    """Simplified serializer for the grid view (Home/Category pages)"""
+    """Optimized minimal serializer for the grid view (Home/Category pages)"""
+    primary_image = serializers.SerializerMethodField()
+    cheapest_variant_price = serializers.SerializerMethodField()
+    on_sale = serializers.SerializerMethodField()
+    category_name = serializers.ReadOnlyField(source='category.name')
+    category_slug = serializers.ReadOnlyField(source='category.slug')
+
+    class Meta:
+        model = Product
+        fields = [
+            'id', 'name', 'slug', 'primary_image', 'cheapest_variant_price', 'on_sale',
+            'is_featured', 'is_best_seller', 'is_new_arrival', 'category_name', 'category_slug',
+            'is_sold_out', 'is_hidden', 'badge_text', 'tags', 'updated_at'
+        ]
+
+    def _get_thumbnail(self, url):
+        if not url: return None
+        # Optimization: If Cloudinary, return a optimized thumbnail instead of full res
+        if 'res.cloudinary.com' in url:
+            # Injecting thumbnail parameters (c_thumb, w_400)
+            return url.replace('/upload/', '/upload/c_thumb,w_400,q_auto,f_auto/')
+        return url
+
+    def get_primary_image(self, obj):
+        # Optimized to use prefetched images
+        images = getattr(obj, 'images', None)
+        url = None
+        if images is not None:
+            # If prefetched, find in memory
+            for img in obj.images.all():
+                if img.is_primary:
+                    url = img.image_url
+                    break
+            if not url:
+                first = obj.images.all().first()
+                url = first.image_url if first else None
+        else:
+            # Fallback to query if not prefetched
+            img = obj.images.filter(is_primary=True).first()
+            url = img.image_url if img else None
+            
+        return self._get_thumbnail(url)
+
+    def get_cheapest_variant_price(self, obj):
+        # Optimized to use prefetched variants
+        variants = getattr(obj, 'variants', None)
+        if variants is not None:
+            v_list = list(obj.variants.all())
+            if v_list:
+                return min(v.price for v in v_list)
+        
+        # Fallback to query
+        variant = obj.variants.order_by('price').first()
+        return variant.price if variant else None
+
+    def get_on_sale(self, obj):
+        # Optimized to use prefetched variants
+        variants = getattr(obj, 'variants', None)
+        if variants is not None:
+            return any(v.discount_price is not None for v in obj.variants.all())
+        
+        # Fallback to query
+        return obj.variants.filter(discount_price__isnull=False).exists()
+
+
+
+    def get_admin_price(self, obj):
+        variant = self._get_admin_variant(obj)
+        return variant.price if variant else None
+
+    def get_admin_weight(self, obj):
+        variant = self._get_admin_variant(obj)
+        return variant.weight if variant else None
+
+class AdminProductListSerializer(serializers.ModelSerializer):
+    """Serializer for Admin Dashboard product table"""
     primary_image = serializers.SerializerMethodField()
     admin_price = serializers.SerializerMethodField()
     admin_weight = serializers.SerializerMethodField()
     category_name = serializers.ReadOnlyField(source='category.name')
-    category_slug = serializers.ReadOnlyField(source='category.slug')
-    variants = ProductVariantSerializer(many=True, read_only=True)
-    images = ProductImageSerializer(many=True, read_only=True)
 
     class Meta:
         model = Product
         fields = [
             'id', 'sku', 'name', 'slug', 'primary_image', 'admin_price', 'admin_weight',
-            'is_featured', 'is_best_seller', 'is_new_arrival', 'category', 'category_name', 'category_slug',
-            'is_sold_out', 'is_hidden', 'badge_text', 'tags', 'variants', 'images', 'updated_at'
+            'is_featured', 'is_best_seller', 'is_new_arrival', 'category_name',
+            'is_sold_out', 'is_hidden', 'updated_at'
         ]
 
-
-
-    def get_primary_image(self, obj):
-        img = obj.images.filter(is_primary=True).first()
-        return img.image_url if img else None
-
     def _get_admin_variant(self, obj):
-        # Try to find 1000 G variant first
+        # Optimization: Use prefetched variants
+        variants = getattr(obj, 'variants', None)
+        if variants is not None:
+            v_list = list(obj.variants.all())
+            # Find 1000G
+            for v in v_list:
+                if '1000' in v.weight: return v
+            # Find Unit
+            for v in v_list:
+                if 'unit' in v.weight.lower(): return v
+            # Cheapest
+            if v_list: return min(v_list, key=lambda x: x.price)
+            return None
+            
         variant = obj.variants.filter(weight__icontains='1000').first()
         if not variant:
-            # Fallback to Unit variant
             variant = obj.variants.filter(weight__icontains='unit').first()
         if not variant:
-            # Final fallback to cheapest
             variant = obj.variants.order_by('price').first()
         return variant
+
+    def get_primary_image(self, obj):
+        images = getattr(obj, 'images', None)
+        if images is not None:
+            for img in obj.images.all():
+                if img.is_primary: return img.image_url
+            first = obj.images.all().first()
+            return first.image_url if first else None
+        
+        img = obj.images.filter(is_primary=True).first()
+        return img.image_url if img else None
 
     def get_admin_price(self, obj):
         variant = self._get_admin_variant(obj)
@@ -124,6 +240,18 @@ class ProductDetailSerializer(serializers.ModelSerializer):
         image_url = validated_data.pop('image_url', None)
         gallery_images = validated_data.pop('gallery_images', [])
 
+        # Upload images to Cloudinary if they are Base64
+        if image_url:
+            image_url = upload_image_to_cloudinary(image_url)
+            
+        if gallery_images:
+            uploaded_gallery = []
+            for img in gallery_images:
+                uploaded_url = upload_image_to_cloudinary(img)
+                if uploaded_url:
+                    uploaded_gallery.append(uploaded_url)
+            gallery_images = uploaded_gallery
+
         product = Product.objects.create(**validated_data)
         
         if base_price:
@@ -174,6 +302,18 @@ class ProductDetailSerializer(serializers.ModelSerializer):
         image_url = validated_data.pop('image_url', None)
         gallery_images = validated_data.pop('gallery_images', None)
         
+        # Upload images to Cloudinary if they are Base64
+        if image_url:
+            image_url = upload_image_to_cloudinary(image_url)
+        
+        if gallery_images:
+            uploaded_gallery = []
+            for img in gallery_images:
+                uploaded_url = upload_image_to_cloudinary(img)
+                if uploaded_url:
+                    uploaded_gallery.append(uploaded_url)
+            gallery_images = uploaded_gallery
+
         # Update model fields
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
