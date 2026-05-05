@@ -1,3 +1,4 @@
+from django.http import JsonResponse
 from rest_framework import viewsets, generics, filters, views, permissions, pagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import api_view, permission_classes
@@ -20,10 +21,17 @@ from .serializers import (
     HeroSlideSerializer
 )
 
-@api_view(['GET'])
-@permission_classes([permissions.AllowAny])
 def ping(request):
-    return Response({"status": "ok", "message": "Pong!"})
+    """
+    Extremely lightweight endpoint for health checks/keeping service awake.
+    Pure Django view to bypass DRF overhead.
+    """
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    
+    response = JsonResponse({"status": "ok", "message": "Pong!"})
+    response["Cache-Control"] = "no-store"
+    return response
 
 @api_view(['POST'])
 @permission_classes([permissions.AllowAny])

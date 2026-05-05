@@ -73,30 +73,21 @@ TEMPLATES = [
 WSGI_APPLICATION = 'config.wsgi.application'
 
 # Database Configuration
-# Uses DATABASE_URL on Render, fallbacks to local postgres variables, then SQLite
-DATABASE_URL = os.getenv('DATABASE_URL')
+# Primary: PostgreSQL (Required for persistence on Render)
+# Fallback: SQLite (Only for local development if no DATABASE_URL is set)
+DATABASES = {
+    'default': dj_database_url.config(
+        default=os.getenv('DATABASE_URL'),
+        conn_max_age=600,
+        ssl_require=True if os.getenv('DATABASE_URL') else False
+    )
+}
 
-if DATABASE_URL:
-    DATABASES = {
-        'default': dj_database_url.config(default=DATABASE_URL, conn_max_age=600)
-    }
-elif os.getenv('DB_ENGINE') == 'django.db.backends.postgresql':
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.postgresql',
-            'NAME': os.getenv('DB_NAME'),
-            'USER': os.getenv('DB_USER'),
-            'PASSWORD': os.getenv('DB_PASSWORD'),
-            'HOST': os.getenv('DB_HOST', 'localhost'),
-            'PORT': os.getenv('DB_PORT', '5432'),
-        }
-    }
-else:
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
-        }
+# If DATABASE_URL is not set (local dev), ensure we have a fallback to prevent errors
+if not os.getenv('DATABASE_URL') and not DATABASES['default']:
+    DATABASES['default'] = {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
     }
 
 # Password validation
