@@ -37,6 +37,11 @@ class Product(models.Model):
     is_hidden = models.BooleanField(default=False, db_index=True)
     badge_text = models.CharField(max_length=50, null=True, blank=True) # e.g., "16% OFF"
     tags = models.JSONField(default=list, blank=True) # e.g., ["Organic", "No Added Sugar"]
+    
+    # Simple pricing fields for easy syncing
+    base_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    base_discount_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -130,10 +135,10 @@ class VisitorLog(models.Model):
     visited_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     @classmethod
-    def cleanup(cls):
-        """Removes logs older than 10 minutes to prevent DB bloat"""
+    def cleanup(cls, days=365):
+        """Removes logs older than 365 days to prevent DB bloat"""
         cls.objects.filter(
-            visited_at__lt=timezone.now() - timedelta(minutes=10)
+            visited_at__lt=timezone.now() - timedelta(days=days)
         ).delete()
 
     def __str__(self):

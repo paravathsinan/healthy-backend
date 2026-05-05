@@ -79,8 +79,11 @@ class HeroSlideViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
 
     def get_queryset(self):
-        # Limit to 10 active slides to prevent memory issues
-        return HeroSlide.objects.filter(is_active=True).order_by('display_order')[:10]
+        queryset = HeroSlide.objects.all().order_by('display_order')
+        if self.action == 'list':
+            # Limit to 10 active slides for the public view
+            return queryset.filter(is_active=True)[:10]
+        return queryset
 
     def get_permissions(self):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
@@ -93,8 +96,11 @@ class CategoryViewSet(viewsets.ModelViewSet):
     serializer_class = CategorySerializer
     
     def get_queryset(self):
-        # Limit to 20 categories to keep response light
-        return Category.objects.all().order_by('display_order')[:20]
+        queryset = Category.objects.all().order_by('display_order')
+        if self.action == 'list':
+            # Limit to 20 categories for the list view to keep response light
+            return queryset[:20]
+        return queryset
     
     def get_permissions(self):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
@@ -149,14 +155,14 @@ class DashboardStatsView(APIView):
         from orders.models import Order
         from .models import VisitorLog
         
-        # Count unique IPs across all time
-        total_visitors = VisitorLog.objects.values('ip_address').distinct().count()
+        # Count unique IPs across all time for a "Total Unique Visitors" metric
+        total_unique_visitors = VisitorLog.objects.values('ip_address').distinct().count()
         
         return Response({
             'product_count': Product.objects.count(),
             'category_count': Category.objects.count(),
             'whatsapp_clicks': Order.objects.count(),
-            'total_visitors': total_visitors,
+            'total_visitors': total_unique_visitors,
         })
 
 class HomePageView(APIView):
@@ -166,7 +172,7 @@ class HomePageView(APIView):
     """
     permission_classes = [permissions.AllowAny]
     
-    @method_decorator(cache_page(60 * 1)) # Cache for 1 minute to match Next.js revalidation
+    @method_decorator(cache_page(10)) # Reduced to 10 seconds for faster updates
     def get(self, request):
         # 1. Hero Slides
         hero_slides = HeroSlide.objects.filter(is_active=True).order_by('display_order')

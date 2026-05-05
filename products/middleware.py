@@ -11,11 +11,9 @@ class VisitorTrackingMiddleware:
         if request.method == 'GET' and not request.path.startswith('/admin'):
             ip = self.get_client_ip(request)
             if ip:
-                # Check if this IP has already been logged today to keep data clean
-                today = timezone.now().date()
+                # Check if this IP has EVER been logged to get a total unique count
                 already_logged = VisitorLog.objects.filter(
-                    ip_address=ip, 
-                    visited_at__date=today
+                    ip_address=ip
                 ).exists()
                 
                 if not already_logged:

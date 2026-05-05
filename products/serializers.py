@@ -68,13 +68,14 @@ class ProductListSerializer(serializers.ModelSerializer):
     on_sale = serializers.SerializerMethodField()
     category_name = serializers.ReadOnlyField(source='category.name')
     category_slug = serializers.ReadOnlyField(source='category.slug')
+    variants = ProductVariantSerializer(many=True, required=False)
 
     class Meta:
         model = Product
         fields = [
             'id', 'name', 'slug', 'primary_image', 'cheapest_variant_price', 'on_sale',
             'is_featured', 'is_best_seller', 'is_new_arrival', 'category_name', 'category_slug',
-            'is_sold_out', 'is_hidden', 'badge_text', 'tags', 'updated_at'
+            'is_sold_out', 'is_hidden', 'badge_text', 'tags', 'variants', 'updated_at'
         ]
 
     def _get_thumbnail(self, url):
@@ -128,28 +129,36 @@ class ProductListSerializer(serializers.ModelSerializer):
 
 
 
-    def get_admin_price(self, obj):
-        variant = self._get_admin_variant(obj)
-        return variant.price if variant else None
-
-    def get_admin_weight(self, obj):
-        variant = self._get_admin_variant(obj)
-        return variant.weight if variant else None
 
 class AdminProductListSerializer(serializers.ModelSerializer):
     """Serializer for Admin Dashboard product table"""
     primary_image = serializers.SerializerMethodField()
-    admin_price = serializers.SerializerMethodField()
+    admin_price = serializers.ReadOnlyField(source='base_price')
+    admin_discount_price = serializers.ReadOnlyField(source='base_discount_price')
     admin_weight = serializers.SerializerMethodField()
+    cheapest_variant_price = serializers.SerializerMethodField()
     category_name = serializers.ReadOnlyField(source='category.name')
+    category_slug = serializers.ReadOnlyField(source='category.slug')
 
     class Meta:
         model = Product
         fields = [
-            'id', 'sku', 'name', 'slug', 'primary_image', 'admin_price', 'admin_weight',
-            'is_featured', 'is_best_seller', 'is_new_arrival', 'category_name',
-            'is_sold_out', 'is_hidden', 'updated_at'
+            'id', 'sku', 'name', 'slug', 'primary_image', 'admin_price', 'admin_discount_price', 'admin_weight',
+            'base_price', 'base_discount_price', 'cheapest_variant_price',
+            'is_featured', 'is_best_seller', 'is_new_arrival', 'category', 'category_name', 'category_slug',
+            'is_sold_out', 'is_hidden', 'variants', 'updated_at'
         ]
+
+    def get_cheapest_variant_price(self, obj):
+        # Use prefetched variants if available
+        variants = getattr(obj, 'variants', None)
+        if variants is not None:
+            v_list = list(obj.variants.all())
+            if v_list:
+                return min(v.price for v in v_list)
+        
+        variant = obj.variants.order_by('price').first()
+        return variant.price if variant else None
 
     def _get_admin_variant(self, obj):
         # Optimization: Use prefetched variants
@@ -185,8 +194,10 @@ class AdminProductListSerializer(serializers.ModelSerializer):
         return img.image_url if img else None
 
     def get_admin_price(self, obj):
-        variant = self._get_admin_variant(obj)
-        return variant.price if variant else None
+        return obj.base_price
+
+    def get_admin_discount_price(self, obj):
+        return obj.base_discount_price
 
     def get_admin_weight(self, obj):
         variant = self._get_admin_variant(obj)
@@ -197,12 +208,11 @@ class ProductDetailSerializer(serializers.ModelSerializer):
     images = ProductImageSerializer(many=True, required=False)
     variants = ProductVariantSerializer(many=True, required=False)
     category_name = serializers.ReadOnlyField(source='category.name')
-    admin_price = serializers.SerializerMethodField()
+    admin_price = serializers.ReadOnlyField(source='base_price')
+    admin_discount_price = serializers.ReadOnlyField(source='base_discount_price')
     admin_weight = serializers.SerializerMethodField()
     
     # Write-only fields for simpler CRUD
-    base_price = serializers.DecimalField(max_digits=10, decimal_places=2, write_only=True, required=False)
-    base_discount_price = serializers.DecimalField(max_digits=10, decimal_places=2, write_only=True, required=False, allow_null=True)
     image_url = serializers.CharField(write_only=True, required=False)
     gallery_images = serializers.ListField(child=serializers.CharField(), write_only=True, required=False)
 
@@ -211,7 +221,7 @@ class ProductDetailSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'sku', 'name', 'slug', 'description', 'category', 
             'category_name', 'images', 'variants', 
-            'is_featured', 'is_best_seller', 'is_new_arrival', 'admin_price', 'admin_weight',
+            'is_featured', 'is_best_seller', 'is_new_arrival', 'admin_price', 'admin_discount_price', 'admin_weight',
             'base_price', 'base_discount_price', 'image_url', 'gallery_images', 'is_sold_out', 'is_hidden', 'badge_text', 'tags', 'updated_at'
         ]
 
@@ -224,8 +234,10 @@ class ProductDetailSerializer(serializers.ModelSerializer):
         return variant
 
     def get_admin_price(self, obj):
-        variant = self._get_admin_variant(obj)
-        return variant.price if variant else None
+        return obj.base_price
+
+    def get_admin_discount_price(self, obj):
+        return obj.base_discount_price
 
     def get_admin_weight(self, obj):
         variant = self._get_admin_variant(obj)
@@ -235,10 +247,12 @@ class ProductDetailSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         images_data = validated_data.pop('images', [])
         variants_data = validated_data.pop('variants', [])
-        base_price = validated_data.pop('base_price', None)
-        base_discount_price = validated_data.pop('base_discount_price', None)
         image_url = validated_data.pop('image_url', None)
         gallery_images = validated_data.pop('gallery_images', [])
+        
+        # Keep base prices in validated_data so they are saved to the Product model
+        base_price = validated_data.get('base_price')
+        base_discount_price = validated_data.get('base_discount_price')
 
         # Upload images to Cloudinary if they are Base64
         if image_url:
@@ -252,33 +266,48 @@ class ProductDetailSerializer(serializers.ModelSerializer):
                     uploaded_gallery.append(uploaded_url)
             gallery_images = uploaded_gallery
 
+        # Create the product with base_price and base_discount_price
         product = Product.objects.create(**validated_data)
         
+        # Handle variant creation from base_price
         if base_price:
             bp = Decimal(str(base_price))
             bdp = Decimal(str(base_discount_price)) if base_discount_price else None
             
-            # 1000G
-            ProductVariant.objects.create(
-                product=product, weight='1000 G', 
-                price=bp, 
-                discount_price=bdp,
-                stock_count=100
-            )
-            # 500G
-            ProductVariant.objects.create(
-                product=product, weight='500 G', 
-                price=(bp * Decimal('0.55')).quantize(Decimal('0.01')), 
-                discount_price=(bdp * Decimal('0.55')).quantize(Decimal('0.01')) if bdp else None,
-                stock_count=100
-            )
-            # 250G
-            ProductVariant.objects.create(
-                product=product, weight='250 G', 
-                price=(bp * Decimal('0.30')).quantize(Decimal('0.01')), 
-                discount_price=(bdp * Decimal('0.30')).quantize(Decimal('0.01')) if bdp else None,
-                stock_count=100
-            )
+            # Determine if it's a unit-based product (Chocolates, Gifts, etc.)
+            is_unit = any(x in product.name.lower() for x in ['chocolate', 'gift', 'box', 'pack', 'jar', 'unit', 'hamper'])
+            
+            if is_unit:
+                # Create 1 Unit variant
+                ProductVariant.objects.create(
+                    product=product, weight='1 Unit', 
+                    price=bp, 
+                    discount_price=bdp,
+                    stock_count=100
+                )
+            else:
+                # Default to weighted variants for Dates/Nuts
+                # 1000G
+                ProductVariant.objects.create(
+                    product=product, weight='1000 G', 
+                    price=bp, 
+                    discount_price=bdp,
+                    stock_count=100
+                )
+                # 500G (50%)
+                ProductVariant.objects.create(
+                    product=product, weight='500 G', 
+                    price=(bp * Decimal('0.50')).quantize(Decimal('0.01')), 
+                    discount_price=(bdp * Decimal('0.50')).quantize(Decimal('0.01')) if bdp else None,
+                    stock_count=100
+                )
+                # 250G (25%)
+                ProductVariant.objects.create(
+                    product=product, weight='250 G', 
+                    price=(bp * Decimal('0.25')).quantize(Decimal('0.01')), 
+                    discount_price=(bdp * Decimal('0.25')).quantize(Decimal('0.01')) if bdp else None,
+                    stock_count=100
+                )
         elif variants_data:
             for variant_data in variants_data:
                 ProductVariant.objects.create(product=product, **variant_data)
@@ -297,11 +326,13 @@ class ProductDetailSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def update(self, instance, validated_data):
-        base_price = validated_data.pop('base_price', None)
-        base_discount_price = validated_data.pop('base_discount_price', None)
         image_url = validated_data.pop('image_url', None)
         gallery_images = validated_data.pop('gallery_images', None)
         
+        # Keep base prices in validated_data so they are saved to the model
+        base_price = validated_data.get('base_price')
+        base_discount_price = validated_data.get('base_discount_price')
+
         # Upload images to Cloudinary if they are Base64
         if image_url:
             image_url = upload_image_to_cloudinary(image_url)
@@ -325,27 +356,38 @@ class ProductDetailSerializer(serializers.ModelSerializer):
             bdp = Decimal(str(base_discount_price)) if base_discount_price else None
             
             instance.variants.all().delete()
-            # 1000G
-            ProductVariant.objects.create(
-                product=instance, weight='1000 G', 
-                price=bp, 
-                discount_price=bdp,
-                stock_count=100
-            )
-            # 500G
-            ProductVariant.objects.create(
-                product=instance, weight='500 G', 
-                price=(bp * Decimal('0.55')).quantize(Decimal('0.01')), 
-                discount_price=(bdp * Decimal('0.55')).quantize(Decimal('0.01')) if bdp else None,
-                stock_count=100
-            )
-            # 250G
-            ProductVariant.objects.create(
-                product=instance, weight='250 G', 
-                price=(bp * Decimal('0.30')).quantize(Decimal('0.01')), 
-                discount_price=(bdp * Decimal('0.30')).quantize(Decimal('0.01')) if bdp else None,
-                stock_count=100
-            )
+            
+            is_unit = any(x in instance.name.lower() for x in ['chocolate', 'gift', 'box', 'pack', 'jar', 'unit', 'hamper'])
+            
+            if is_unit:
+                ProductVariant.objects.create(
+                    product=instance, weight='1 Unit', 
+                    price=bp, 
+                    discount_price=bdp,
+                    stock_count=100
+                )
+            else:
+                # 1000G
+                ProductVariant.objects.create(
+                    product=instance, weight='1000 G', 
+                    price=bp, 
+                    discount_price=bdp,
+                    stock_count=100
+                )
+                # 500G (50%)
+                ProductVariant.objects.create(
+                    product=instance, weight='500 G', 
+                    price=(bp * Decimal('0.50')).quantize(Decimal('0.01')), 
+                    discount_price=(bdp * Decimal('0.50')).quantize(Decimal('0.01')) if bdp else None,
+                    stock_count=100
+                )
+                # 250G (25%)
+                ProductVariant.objects.create(
+                    product=instance, weight='250 G', 
+                    price=(bp * Decimal('0.25')).quantize(Decimal('0.01')), 
+                    discount_price=(bdp * Decimal('0.25')).quantize(Decimal('0.01')) if bdp else None,
+                    stock_count=100
+                )
             
         # Update images only if image_url or non-empty gallery provided
         if image_url or (gallery_images is not None and len(gallery_images) > 0):
