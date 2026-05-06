@@ -150,10 +150,12 @@ class BrowserVisitor(models.Model):
     Tracks unique visitors via a UUID stored in the browser's localStorage.
     One row per unique device/browser — far more accurate than IP-based tracking.
     VPNs, shared WiFi, and mobile network changes do NOT inflate this count.
+    total_time_seconds accumulates every session duration sent by the frontend.
     """
     visitor_id = models.UUIDField(unique=True, db_index=True)
     first_seen = models.DateTimeField(auto_now_add=True, db_index=True)
     last_seen = models.DateTimeField(auto_now=True)
+    total_time_seconds = models.PositiveIntegerField(default=0)
 
     class Meta:
         verbose_name = "Browser Visitor"

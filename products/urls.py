@@ -4,7 +4,7 @@ from .views import (
     CategoryViewSet, ProductViewSet, CreateOrderLogView,
     DashboardStatsView, HeroSlideViewSet, HomePageView,
     TrackVisitView, VisitorListView, admin_login, ping, verify_token,
-    CloudinarySignatureView
+    CloudinarySignatureView, UploadImageView, ClearVisitorsView
 )
 
 router = DefaultRouter()
@@ -24,4 +24,6 @@ urlpatterns = [
     path('track-visit/', TrackVisitView.as_view(), name='track-visit'),
     path('visitors/', VisitorListView.as_view(), name='visitor-list'),
     path('cloudinary-signature/', CloudinarySignatureView.as_view(), name='cloudinary-signature'),
+    path('upload-image/', UploadImageView.as_view(), name='upload-image'),
+    path('clear-visitors/', ClearVisitorsView.as_view(), name='clear-visitors'),
 ]

@@ -1,6 +1,6 @@
 import os
 from django.http import JsonResponse
-from rest_framework import viewsets, generics, filters, views, permissions, pagination
+from rest_framework import viewsets, generics, filters, views, permissions, pagination, parsers
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import api_view, permission_classes, action
 from django.db.models import Count, Q
@@ -22,6 +22,7 @@ from .serializers import (
     ShadowOrderLogSerializer,
     HeroSlideSerializer
 )
+from .utils import upload_image_to_cloudinary
 
 def ping(request):
     """
@@ -238,15 +239,15 @@ class DashboardStatsView(APIView):
 
 class TrackVisitView(APIView):
     """
-    Called once per browser/device when the storefront loads.
-    The frontend generates a UUID and stores it in localStorage so it
-    only calls this endpoint once per browser — no repeat counting.
+    Called on every page load (first visit) and whenever the visitor leaves
+    (to add the session duration to their total_time_seconds).
     """
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
         import uuid as uuid_lib
         visitor_id_raw = request.data.get('visitor_id', '')
+        session_seconds = request.data.get('session_seconds', 0)
 
         if not visitor_id_raw:
             return Response({'error': 'visitor_id is required'}, status=400)
@@ -256,8 +257,20 @@ class TrackVisitView(APIView):
         except (ValueError, AttributeError):
             return Response({'error': 'Invalid visitor_id format'}, status=400)
 
-        # get_or_create ensures we never double-count the same browser
-        _, created = BrowserVisitor.objects.get_or_create(visitor_id=visitor_id)
+        # Clamp session to sensible bounds (0–2 hours) to prevent bad data
+        try:
+            session_seconds = max(0, min(int(session_seconds), 7200))
+        except (TypeError, ValueError):
+            session_seconds = 0
+
+        visitor, created = BrowserVisitor.objects.get_or_create(visitor_id=visitor_id)
+
+        # Always accumulate session time and refresh last_seen
+        if session_seconds > 0:
+            from django.db.models import F
+            BrowserVisitor.objects.filter(visitor_id=visitor_id).update(
+                total_time_seconds=F('total_time_seconds') + session_seconds
+            )
 
         return Response({'tracked': created}, status=201 if created else 200)
 
@@ -279,10 +292,11 @@ class VisitorListView(APIView):
 
         data = [
             {
-                'id': str(v.visitor_id)[:8] + '...',  # Short display ID
+                'id': str(v.visitor_id)[:8] + '...',
                 'visitor_id': str(v.visitor_id),
                 'first_seen': v.first_seen.isoformat(),
                 'last_seen': v.last_seen.isoformat(),
+                'total_time_seconds': v.total_time_seconds,
             }
             for v in visitors
         ]
@@ -293,6 +307,25 @@ class VisitorListView(APIView):
             'page': page,
             'total_pages': (total + page_size - 1) // page_size,
         })
+
+
+class ClearVisitorsView(APIView):
+    """
+    Deletes ALL BrowserVisitor records so the count resets to zero.
+    Admin-only. Also clears VisitorLog entries.
+    """
+    permission_classes = [permissions.IsAdminUser]
+
+    def delete(self, request):
+        from django.db import transaction
+        with transaction.atomic():
+            bv_count = BrowserVisitor.objects.count()
+            BrowserVisitor.objects.all().delete()
+            # Also clear IP-based logs
+            from .models import VisitorLog
+            VisitorLog.objects.all().delete()
+
+        return Response({'cleared': bv_count})
 
 class HomePageView(APIView):
     """
@@ -356,3 +389,31 @@ class CloudinarySignatureView(APIView):
             'api_key': api_key,
             'folder': folder,
         })
+
+
+class UploadImageView(APIView):
+    """
+    Accepts a real multipart file upload (not Base64) from the admin frontend
+    and uploads it directly to Cloudinary using the server-configured SDK.
+
+    This is the reliable production approach:
+    - File travels as multipart/form-data (no Base64 inflation)
+    - Cloudinary credentials stay server-side at all times
+    - Uses the same upload_image_to_cloudinary utility as the rest of the app
+    """
+    permission_classes = [permissions.IsAdminUser]
+    parser_classes = [parsers.MultiPartParser, parsers.FormParser]
+
+    def post(self, request):
+        file = request.FILES.get('file')
+        folder = request.data.get('folder', 'dates_nuts/products')
+
+        if not file:
+            return Response({'error': 'No file provided.'}, status=400)
+
+        url = upload_image_to_cloudinary(file, folder=folder)
+
+        if not url:
+            return Response({'error': 'Cloudinary upload failed. Check server logs.'}, status=500)
+
+        return Response({'url': url})
