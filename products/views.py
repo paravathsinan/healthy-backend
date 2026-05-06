@@ -393,27 +393,43 @@ class CloudinarySignatureView(APIView):
 
 class UploadImageView(APIView):
     """
-    Accepts a real multipart file upload (not Base64) from the admin frontend
-    and uploads it directly to Cloudinary using the server-configured SDK.
-
-    This is the reliable production approach:
-    - File travels as multipart/form-data (no Base64 inflation)
-    - Cloudinary credentials stay server-side at all times
-    - Uses the same upload_image_to_cloudinary utility as the rest of the app
+    Accepts a real multipart file upload from the admin frontend and uploads
+    it to Cloudinary using the SDK.
+    Credentials are read automatically from CLOUDINARY_URL env var.
+    Set: CLOUDINARY_URL=cloudinary://<api_key>:<api_secret>@<cloud_name>
     """
     permission_classes = [permissions.IsAdminUser]
     parser_classes = [parsers.MultiPartParser, parsers.FormParser]
 
     def post(self, request):
+        import cloudinary
+        import cloudinary.uploader
+
         file = request.FILES.get('file')
         folder = request.data.get('folder', 'dates_nuts/products')
 
         if not file:
             return Response({'error': 'No file provided.'}, status=400)
 
-        url = upload_image_to_cloudinary(file, folder=folder)
+        # Pre-flight: verify CLOUDINARY_URL is set
+        if not os.getenv('CLOUDINARY_URL', ''):
+            return Response(
+                {'error': 'Cloudinary not configured. Add CLOUDINARY_URL env var on Render.'},
+                status=500
+            )
 
-        if not url:
-            return Response({'error': 'Cloudinary upload failed. Check server logs.'}, status=500)
+        try:
+            result = cloudinary.uploader.upload(
+                file,
+                folder=folder,
+                resource_type='auto',
+            )
+            url = result.get('secure_url')
+            if not url:
+                return Response({'error': 'Cloudinary returned no URL.'}, status=500)
+            return Response({'url': url})
 
-        return Response({'url': url})
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f'Cloudinary upload error: {e}')
+            return Response({'error': f'Cloudinary error: {str(e)}'}, status=500)

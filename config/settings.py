@@ -154,9 +154,6 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 DATA_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024  # 20 MB
 
 # Cloudinary Configuration
-cloudinary.config(
-    cloud_name=os.getenv('CLOUDINARY_CLOUD_NAME'),
-    api_key=os.getenv('CLOUDINARY_API_KEY'),
-    api_secret=os.getenv('CLOUDINARY_API_SECRET'),
-    secure=True
-)
+# Set CLOUDINARY_URL=cloudinary://<api_key>:<api_secret>@<cloud_name> in env
+# The SDK reads it automatically — cloudinary.config(secure=True) is all that's needed
+cloudinary.config(secure=True)
