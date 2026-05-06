@@ -144,3 +144,21 @@ class VisitorLog(models.Model):
     def __str__(self):
         return f"Visit from {self.ip_address} at {self.visited_at}"
 
+
+class BrowserVisitor(models.Model):
+    """
+    Tracks unique visitors via a UUID stored in the browser's localStorage.
+    One row per unique device/browser — far more accurate than IP-based tracking.
+    VPNs, shared WiFi, and mobile network changes do NOT inflate this count.
+    """
+    visitor_id = models.UUIDField(unique=True, db_index=True)
+    first_seen = models.DateTimeField(auto_now_add=True, db_index=True)
+    last_seen = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Browser Visitor"
+        verbose_name_plural = "Browser Visitors"
+
+    def __str__(self):
+        return f"Visitor {self.visitor_id} (first seen {self.first_seen:%Y-%m-%d})"
+

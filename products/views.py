@@ -1,7 +1,9 @@
+import os
 from django.http import JsonResponse
 from rest_framework import viewsets, generics, filters, views, permissions, pagination
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, action
+from django.db.models import Count, Q
 from django.contrib.auth import authenticate
 from rest_framework.authtoken.models import Token
 from rest_framework.response import Response
@@ -11,7 +13,7 @@ from rest_framework.response import Response
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
 from django_filters.rest_framework import DjangoFilterBackend
-from .models import Category, Product, ShadowOrderLog, HeroSlide
+from .models import Category, Product, ShadowOrderLog, HeroSlide, BrowserVisitor
 from .serializers import (
     CategorySerializer, 
     ProductListSerializer, 
@@ -107,6 +109,18 @@ class CategoryViewSet(viewsets.ModelViewSet):
             return [permissions.IsAdminUser()]
         return [permissions.AllowAny()]
 
+    @action(detail=False, methods=['get'])
+    def popular(self, request):
+        """
+        Returns the top 6 categories that have the most products added (and are not hidden).
+        """
+        queryset = Category.objects.annotate(
+            product_count=Count('products', filter=Q(products__is_hidden=False))
+        ).order_by('-product_count', 'display_order')[:6]
+        
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
 class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.all()
     lookup_field = 'slug'
@@ -144,6 +158,63 @@ class ProductViewSet(viewsets.ModelViewSet):
             
         return ProductListSerializer
 
+    @action(detail=False, methods=['get'], url_path='filter-options')
+    def filter_options(self, request):
+        """
+        Returns all dynamic data needed to populate the storefront filter dropdowns:
+        - Availability counts (in stock / out of stock)
+        - Price range (min and max across all active variants)
+        - Categories with their active product counts
+        - Distinct variant weights with product counts
+        """
+        from django.db.models import Min, Max
+        from .models import ProductVariant
+
+        base_qs = Product.objects.filter(is_hidden=False)
+
+        # --- Availability ---
+        in_stock_count = base_qs.filter(is_sold_out=False).count()
+        out_of_stock_count = base_qs.filter(is_sold_out=True).count()
+
+        # --- Price range (from variants of visible products) ---
+        price_agg = ProductVariant.objects.filter(
+            product__is_hidden=False
+        ).aggregate(
+            min_price=Min('price'),
+            max_price=Max('price')
+        )
+
+        # --- Categories with product counts ---
+        categories = (
+            Category.objects
+            .annotate(product_count=Count('products', filter=Q(products__is_hidden=False)))
+            .filter(product_count__gt=0)
+            .order_by('display_order', 'name')
+            .values('name', 'slug', 'product_count')
+        )
+
+        # --- Variant weights with distinct product counts ---
+        weights = (
+            ProductVariant.objects
+            .filter(product__is_hidden=False)
+            .values('weight')
+            .annotate(product_count=Count('product', distinct=True))
+            .order_by('weight')
+        )
+
+        return Response({
+            'availability': {
+                'in_stock': in_stock_count,
+                'out_of_stock': out_of_stock_count,
+            },
+            'price': {
+                'min': float(price_agg['min_price'] or 0),
+                'max': float(price_agg['max_price'] or 0),
+            },
+            'categories': list(categories),
+            'weights': list(weights),
+        })
+
 class CreateOrderLogView(generics.CreateAPIView):
     """Endpoint to log when someone clicks the WhatsApp button"""
     queryset = ShadowOrderLog.objects.all()
@@ -151,18 +222,76 @@ class CreateOrderLogView(generics.CreateAPIView):
 
 class DashboardStatsView(APIView):
     permission_classes = [permissions.IsAdminUser]
+
     def get(self, request):
         from orders.models import Order
-        from .models import VisitorLog
-        
-        # Count unique IPs across all time for a "Total Unique Visitors" metric
-        total_unique_visitors = VisitorLog.objects.values('ip_address').distinct().count()
-        
+        # Count unique browser UUIDs — one per device/browser (accurate)
+        total_unique_visitors = BrowserVisitor.objects.count()
+
         return Response({
             'product_count': Product.objects.count(),
             'category_count': Category.objects.count(),
             'whatsapp_clicks': Order.objects.count(),
             'total_visitors': total_unique_visitors,
+        })
+
+
+class TrackVisitView(APIView):
+    """
+    Called once per browser/device when the storefront loads.
+    The frontend generates a UUID and stores it in localStorage so it
+    only calls this endpoint once per browser — no repeat counting.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        import uuid as uuid_lib
+        visitor_id_raw = request.data.get('visitor_id', '')
+
+        if not visitor_id_raw:
+            return Response({'error': 'visitor_id is required'}, status=400)
+
+        try:
+            visitor_id = uuid_lib.UUID(str(visitor_id_raw))
+        except (ValueError, AttributeError):
+            return Response({'error': 'Invalid visitor_id format'}, status=400)
+
+        # get_or_create ensures we never double-count the same browser
+        _, created = BrowserVisitor.objects.get_or_create(visitor_id=visitor_id)
+
+        return Response({'tracked': created}, status=201 if created else 200)
+
+
+class VisitorListView(APIView):
+    """
+    Returns a paginated list of unique browser visitors for the admin dashboard.
+    Admin-only endpoint.
+    """
+    permission_classes = [permissions.IsAdminUser]
+
+    def get(self, request):
+        page = int(request.query_params.get('page', 1))
+        page_size = int(request.query_params.get('page_size', 20))
+        offset = (page - 1) * page_size
+
+        total = BrowserVisitor.objects.count()
+        visitors = BrowserVisitor.objects.order_by('-first_seen')[offset:offset + page_size]
+
+        data = [
+            {
+                'id': str(v.visitor_id)[:8] + '...',  # Short display ID
+                'visitor_id': str(v.visitor_id),
+                'first_seen': v.first_seen.isoformat(),
+                'last_seen': v.last_seen.isoformat(),
+            }
+            for v in visitors
+        ]
+
+        return Response({
+            'count': total,
+            'results': data,
+            'page': page,
+            'total_pages': (total + page_size - 1) // page_size,
         })
 
 class HomePageView(APIView):
@@ -195,4 +324,35 @@ class HomePageView(APIView):
             'featured': ProductListSerializer(featured_products, many=True).data,
             'new_arrivals': ProductListSerializer(new_arrivals, many=True).data,
             'chocolates': ProductListSerializer(chocolate_products, many=True).data,
+        })
+
+
+class CloudinarySignatureView(APIView):
+    """
+    Generates a short-lived Cloudinary upload signature for direct browser-to-Cloudinary uploads.
+    Admin-only — keeps the API secret server-side at all times.
+    """
+    permission_classes = [permissions.IsAdminUser]
+
+    def get(self, request):
+        import time
+        import hashlib
+
+        folder = request.query_params.get('folder', 'dates_nuts/products')
+        timestamp = int(time.time())
+
+        api_secret = os.getenv('CLOUDINARY_API_SECRET', '')
+        cloud_name = os.getenv('CLOUDINARY_CLOUD_NAME', '')
+        api_key = os.getenv('CLOUDINARY_API_KEY', '')
+
+        # Build the string-to-sign (params must be alphabetically sorted)
+        params_to_sign = f"folder={folder}&timestamp={timestamp}"
+        signature = hashlib.sha256(f"{params_to_sign}{api_secret}".encode()).hexdigest()
+
+        return Response({
+            'signature': signature,
+            'timestamp': timestamp,
+            'cloud_name': cloud_name,
+            'api_key': api_key,
+            'folder': folder,
         })

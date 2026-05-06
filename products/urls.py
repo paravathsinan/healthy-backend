@@ -1,9 +1,10 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
-    CategoryViewSet, ProductViewSet, CreateOrderLogView, 
+    CategoryViewSet, ProductViewSet, CreateOrderLogView,
     DashboardStatsView, HeroSlideViewSet, HomePageView,
-    admin_login, ping, verify_token
+    TrackVisitView, VisitorListView, admin_login, ping, verify_token,
+    CloudinarySignatureView
 )
 
 router = DefaultRouter()
@@ -20,4 +21,7 @@ urlpatterns = [
     path('homepage/', HomePageView.as_view(), name='homepage'),
     path('log-order/', CreateOrderLogView.as_view(), name='log-order'),
     path('dashboard-stats/', DashboardStatsView.as_view(), name='dashboard-stats'),
+    path('track-visit/', TrackVisitView.as_view(), name='track-visit'),
+    path('visitors/', VisitorListView.as_view(), name='visitor-list'),
+    path('cloudinary-signature/', CloudinarySignatureView.as_view(), name='cloudinary-signature'),
 ]

@@ -50,7 +50,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'products.middleware.VisitorTrackingMiddleware',
+    # NOTE: IP-based VisitorTrackingMiddleware removed — replaced by browser-UUID tracking via /api/v1/track-visit/
 ]
 
 ROOT_URLCONF = 'config.urls'
@@ -149,6 +149,9 @@ REST_FRAMEWORK = {
 }
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# Allow up to 20MB request body (Base64 images can be large)
+DATA_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024  # 20 MB
 
 # Cloudinary Configuration
 cloudinary.config(
