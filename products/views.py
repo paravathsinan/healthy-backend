@@ -263,13 +263,21 @@ class TrackVisitView(APIView):
         except (TypeError, ValueError):
             session_seconds = 0
 
+        from django.utils import timezone
+        from django.db.models import F
+
         visitor, created = BrowserVisitor.objects.get_or_create(visitor_id=visitor_id)
 
-        # Always accumulate session time and refresh last_seen
+        # Always refresh last_seen and accumulate session time
+        update_fields = {'last_seen': timezone.now()}
         if session_seconds > 0:
-            from django.db.models import F
             BrowserVisitor.objects.filter(visitor_id=visitor_id).update(
+                last_seen=timezone.now(),
                 total_time_seconds=F('total_time_seconds') + session_seconds
+            )
+        else:
+            BrowserVisitor.objects.filter(visitor_id=visitor_id).update(
+                last_seen=timezone.now()
             )
 
         return Response({'tracked': created}, status=201 if created else 200)

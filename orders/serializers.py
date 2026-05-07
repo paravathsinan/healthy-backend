@@ -5,9 +5,28 @@ from products.models import Product, ProductVariant
 from django.db import transaction
 from decimal import Decimal
 
+
+class SafePrimaryKeyRelatedField(serializers.PrimaryKeyRelatedField):
+    """
+    A lenient PrimaryKeyRelatedField that returns None instead of raising a
+    validation error when the referenced object no longer exists.
+
+    This handles stale cart data where a customer has a variant/product ID
+    stored in localStorage that was deleted from the database.
+    The order still captures product_name / variant_name as text snapshots,
+    so order fulfilment is unaffected.
+    """
+    def to_internal_value(self, data):
+        try:
+            return super().to_internal_value(data)
+        except (serializers.ValidationError, Exception):
+            return None
+
+
 class OrderItemSerializer(serializers.ModelSerializer):
-    product = serializers.PrimaryKeyRelatedField(queryset=Product.objects.all(), required=False, allow_null=True)
-    variant = serializers.PrimaryKeyRelatedField(queryset=ProductVariant.objects.all(), required=False, allow_null=True)
+    product = SafePrimaryKeyRelatedField(queryset=Product.objects.all(), required=False, allow_null=True)
+    variant = SafePrimaryKeyRelatedField(queryset=ProductVariant.objects.all(), required=False, allow_null=True)
+
 
     class Meta:
         model = OrderItem
